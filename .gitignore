@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Next.js build output
+/.next/
+/out/
+
+# Production build & logs
+/build
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local environment files (NEVER commit secrets)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Scratch & temporary files
+scratch/
+*.tsbuildinfo
+next-env.d.ts

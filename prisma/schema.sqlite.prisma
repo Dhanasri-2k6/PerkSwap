@@ -1,0 +1,127 @@
+// PerkSwap SQLite Schema (Zero-config local development fallback)
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id              String        @id @default(uuid())
+  name            String
+  email           String        @unique
+  passwordHash    String
+  walletBalance   Float         @default(1000.0)
+  trustScore      Int           @default(85)
+  verified        Boolean       @default(true)
+  completedTrades Int           @default(0)
+  disputeCount    Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  vouchersListed      Voucher[]      @relation("SellerVouchers")
+  purchases           Transaction[]  @relation("BuyerTransactions")
+  sales               Transaction[]  @relation("SellerTransactions")
+  swapsInitiated      SwapRequest[]  @relation("SwapRequester")
+  swapsReceived       SwapRequest[]  @relation("SwapRequested")
+  disputesInitiated   Dispute[]      @relation("UserDisputes")
+}
+
+model Voucher {
+  id                  String        @id @default(uuid())
+  sellerId            String
+  seller              User          @relation("SellerVouchers", fields: [sellerId], references: [id], onDelete: Cascade)
+  
+  brand               String
+  category            String        @default("SHOPPING") // FOOD, SHOPPING, TRAVEL, ENTERTAINMENT, TECH, OTHER
+  title               String?
+  description         String?
+  
+  code                String        // AES-256-GCM ciphertext
+  codeIv              String?       // AES IV
+  codeTag             String?       // AES Auth Tag
+  
+  faceValue           Float
+  sellingPrice        Float
+  aiRecommendedPrice  Float?
+  minSpend            Float         @default(0.0)
+  expiryDate          DateTime
+  
+  status              String        @default("ACTIVE") // DRAFT, ACTIVE, IN_ESCROW, SOLD, SWAPPED, EXPIRED
+  isSwapOnly          Boolean       @default(false)
+  autoPriceDecay      Boolean       @default(false)
+  priceDecayRate      Float         @default(0.05)
+  lastDecayedAt       DateTime?
+  
+  fraudScore          Int           @default(0)
+  tamperFlags         String        @default("[]") // JSON string of flags
+  termsAndConditions  String        @default("[]") // JSON string of terms
+  imageUrl            String?
+  
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  transactions        Transaction[]
+  offeredInSwaps      SwapRequest[] @relation("OfferedVoucher")
+  targetedInSwaps     SwapRequest[] @relation("TargetVoucher")
+}
+
+model Transaction {
+  id                  String        @id @default(uuid())
+  buyerId             String
+  buyer               User          @relation("BuyerTransactions", fields: [buyerId], references: [id])
+  sellerId            String
+  seller              User          @relation("SellerTransactions", fields: [sellerId], references: [id])
+  voucherId           String
+  voucher             Voucher       @relation(fields: [voucherId], references: [id])
+  
+  amount              Float
+  platformFee         Float         @default(0.0)
+  sellerEarnings      Float         @default(0.0)
+  
+  status              String        @default("HELD_IN_ESCROW") // HELD_IN_ESCROW, RELEASED, REFUNDED, DISPUTED
+  
+  expiresAt           DateTime
+  releasedAt          DateTime?
+  
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  dispute             Dispute?
+}
+
+model SwapRequest {
+  id                  String        @id @default(uuid())
+  requesterId         String
+  requester           User          @relation("SwapRequester", fields: [requesterId], references: [id])
+  requestedId         String
+  requested           User          @relation("SwapRequested", fields: [requestedId], references: [id])
+  
+  offeredVoucherId    String
+  offeredVoucher      Voucher       @relation("OfferedVoucher", fields: [offeredVoucherId], references: [id])
+  targetVoucherId     String
+  targetVoucher       Voucher       @relation("TargetVoucher", fields: [targetVoucherId], references: [id])
+  
+  status              String        @default("PENDING") // PENDING, ACCEPTED, DECLINED, CANCELLED
+  notes               String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+}
+
+model Dispute {
+  id                  String        @id @default(uuid())
+  transactionId       String        @unique
+  transaction         Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  initiatorId         String
+  initiator           User          @relation("UserDisputes", fields: [initiatorId], references: [id])
+  
+  reason              String
+  evidenceUrl         String?
+  resolutionNotes     String?
+  status              String        @default("OPEN") // OPEN, RESOLVED_BUYER, RESOLVED_SELLER, CANCELLED
+  
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+}

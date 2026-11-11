@@ -1,0 +1,194 @@
+// PerkSwap Database Schema (PostgreSQL with pgvector readiness)
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Category {
+  FOOD
+  SHOPPING
+  TRAVEL
+  ENTERTAINMENT
+  TECH
+  OTHER
+}
+
+enum VoucherStatus {
+  DRAFT
+  ACTIVE
+  IN_ESCROW
+  SOLD
+  SWAPPED
+  EXPIRED
+}
+
+enum EscrowStatus {
+  HELD_IN_ESCROW
+  RELEASED
+  REFUNDED
+  DISPUTED
+}
+
+enum SwapStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
+enum DisputeStatus {
+  OPEN
+  RESOLVED_BUYER
+  RESOLVED_SELLER
+  CANCELLED
+}
+
+model User {
+  id              String        @id @default(uuid())
+  name            String
+  email           String        @unique
+  passwordHash    String
+  walletBalance   Float         @default(1000.0) // Mock balance preloaded for sandbox testing
+  trustScore      Int           @default(85)     // Trust Score 0 - 100
+  verified        Boolean       @default(true)
+  completedTrades Int           @default(0)
+  disputeCount    Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relationships
+  vouchersListed      Voucher[]      @relation("SellerVouchers")
+  purchases           Transaction[]  @relation("BuyerTransactions")
+  sales               Transaction[]  @relation("SellerTransactions")
+  swapsInitiated      SwapRequest[]  @relation("SwapRequester")
+  swapsReceived       SwapRequest[]  @relation("SwapRequested")
+  disputesInitiated   Dispute[]      @relation("UserDisputes")
+
+  @@index([email])
+}
+
+model Voucher {
+  id                  String        @id @default(uuid())
+  sellerId            String
+  seller              User          @relation("SellerVouchers", fields: [sellerId], references: [id], onDelete: Cascade)
+  
+  brand               String
+  category            Category      @default(SHOPPING)
+  title               String?
+  description         String?
+  
+  // Security: AES-256-GCM encrypted coupon code + initialization vector & auth tag
+  code                String        // Ciphertext (Base64)
+  codeIv              String?       // AES IV (Base64)
+  codeTag             String?       // AES Auth Tag (Base64)
+  
+  faceValue           Float
+  sellingPrice        Float
+  aiRecommendedPrice  Float?
+  minSpend            Float         @default(0.0)
+  expiryDate          DateTime
+  
+  status              VoucherStatus @default(ACTIVE)
+  isSwapOnly          Boolean       @default(false)
+  autoPriceDecay      Boolean       @default(false)
+  priceDecayRate      Float         @default(0.05) // 5% per 24 hours
+  lastDecayedAt       DateTime?
+  
+  // AI Multimodal Verification & Fraud Analysis
+  fraudScore          Int           @default(0)    // 0 - 100 (0 = clean, >40 = suspicious, >75 = high risk)
+  tamperFlags         String[]      @default([])   // Mismatched font, edited text, pixel noise, etc.
+  termsAndConditions  String[]      @default([])
+  imageUrl            String?
+  
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  // Relationships
+  transactions        Transaction[]
+  offeredInSwaps      SwapRequest[] @relation("OfferedVoucher")
+  targetedInSwaps     SwapRequest[] @relation("TargetVoucher")
+
+  @@index([sellerId])
+  @@index([status])
+  @@index([brand])
+  @@index([category])
+  @@index([expiryDate])
+}
+
+model Transaction {
+  id                  String        @id @default(uuid())
+  buyerId             String
+  buyer               User          @relation("BuyerTransactions", fields: [buyerId], references: [id])
+  sellerId            String
+  seller              User          @relation("SellerTransactions", fields: [sellerId], references: [id])
+  voucherId           String
+  voucher             Voucher       @relation(fields: [voucherId], references: [id])
+  
+  amount              Float         // Total amount held in escrow
+  platformFee         Float         @default(0.0)  // 5% standard platform cut
+  sellerEarnings      Float         @default(0.0)  // amount - platformFee
+  
+  status              EscrowStatus  @default(HELD_IN_ESCROW)
+  
+  // Inspection window (typically 2 hours from escrow initiation)
+  expiresAt           DateTime      // Auto-release deadline
+  releasedAt          DateTime?
+  
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  // Relationships
+  dispute             Dispute?
+
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([voucherId])
+  @@index([status])
+}
+
+model SwapRequest {
+  id                  String        @id @default(uuid())
+  requesterId         String
+  requester           User          @relation("SwapRequester", fields: [requesterId], references: [id])
+  requestedId         String
+  requested           User          @relation("SwapRequested", fields: [requestedId], references: [id])
+  
+  offeredVoucherId    String
+  offeredVoucher      Voucher       @relation("OfferedVoucher", fields: [offeredVoucherId], references: [id])
+  targetVoucherId     String
+  targetVoucher       Voucher       @relation("TargetVoucher", fields: [targetVoucherId], references: [id])
+  
+  status              SwapStatus    @default(PENDING)
+  notes               String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  @@index([requesterId])
+  @@index([requestedId])
+  @@index([offeredVoucherId])
+  @@index([targetVoucherId])
+  @@index([status])
+}
+
+model Dispute {
+  id                  String        @id @default(uuid())
+  transactionId       String        @unique
+  transaction         Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  initiatorId         String
+  initiator           User          @relation("UserDisputes", fields: [initiatorId], references: [id])
+  
+  reason              String
+  evidenceUrl         String?
+  resolutionNotes     String?
+  status              DisputeStatus @default(OPEN)
+  
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  @@index([initiatorId])
+  @@index([status])
+}
