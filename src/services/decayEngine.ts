@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
 
 export interface DecayExecutionSummary {
   processedCount: number;
@@ -31,15 +31,11 @@ export class PriceDecayEngine {
       const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
       // Find all active vouchers with autoPriceDecay enabled that haven't been decayed in the last 24 hours
-      const eligibleVouchers = await prisma.voucher.findMany({
-        where: {
-          status: "ACTIVE",
-          autoPriceDecay: true,
-          OR: [
-            { lastDecayedAt: null },
-            { lastDecayedAt: { lte: twentyFourHoursAgo } },
-          ],
-        },
+      const allActive = await db.vouchers.findMany({ status: "ACTIVE" });
+      const eligibleVouchers = allActive.filter((voucher: any) => {
+        if (!voucher.autoPriceDecay) return false;
+        if (!voucher.lastDecayedAt) return true;
+        return new Date(voucher.lastDecayedAt) <= twentyFourHoursAgo;
       });
 
       summary.processedCount = eligibleVouchers.length;
@@ -55,12 +51,9 @@ export class PriceDecayEngine {
         if (newPrice < voucher.sellingPrice) {
           const discountAmount = voucher.sellingPrice - newPrice;
 
-          await prisma.voucher.update({
-            where: { id: voucher.id },
-            data: {
-              sellingPrice: newPrice,
-              lastDecayedAt: now,
-            },
+          await db.vouchers.update(voucher.id, {
+            sellingPrice: newPrice,
+            lastDecayedAt: now,
           });
 
           summary.decayedCount++;

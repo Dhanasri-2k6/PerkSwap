@@ -5,14 +5,29 @@ declare global {
   var prismaGlobal: PrismaClient | undefined;
 }
 
-export const prisma =
-  globalThis.prismaGlobal ??
-  new PrismaClient({
+function getPrismaClient(): PrismaClient {
+  if (globalThis.prismaGlobal) {
+    return globalThis.prismaGlobal;
+  }
+
+  const client = new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 
-if (process.env.NODE_ENV !== "production") {
-  globalThis.prismaGlobal = prisma;
+  if (process.env.NODE_ENV !== "production") {
+    globalThis.prismaGlobal = client;
+  }
+
+  return client;
 }
+
+// Lazy Proxy prevents `new PrismaClient()` from throwing during Next.js build / page-data collection
+export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    const client = getPrismaClient();
+    const value = (client as any)[prop];
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+});
 
 export default prisma;

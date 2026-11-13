@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
 
 export interface MatchedVoucherRecommendation {
   voucher: {
@@ -80,19 +80,9 @@ Return strictly JSON:
     parsedIntent = heuristicParsePrompt(prompt);
   }
 
-  // Fetch active vouchers from DB
-  const vouchers = await prisma.voucher.findMany({
-    where: {
-      status: "ACTIVE",
-    },
-    include: {
-      seller: {
-        select: {
-          name: true,
-          trustScore: true,
-        },
-      },
-    },
+  // Fetch active vouchers from DB (MongoDB or resilient memory fallback)
+  const vouchers = await db.vouchers.findMany({
+    status: "ACTIVE",
   });
 
   const cart = parsedIntent.cartValue;
@@ -101,7 +91,7 @@ Return strictly JSON:
 
   // Score and rank vouchers
   const scoredRecommendations: MatchedVoucherRecommendation[] = vouchers
-    .map((v) => {
+    .map((v: any) => {
       const meetsMinSpend = cart >= v.minSpend;
       // Actual discount buyer gets on their cart
       const applicableDiscount = Math.min(v.faceValue, cart);
@@ -116,17 +106,24 @@ Return strictly JSON:
         reason = `Massive ${Math.round((v.faceValue / cart) * 100)}% discount with immediate ₹${netSavings} cash savings!`;
       }
 
+      const expiryStr =
+        v.expiryDate instanceof Date
+          ? v.expiryDate.toISOString()
+          : typeof v.expiryDate === "string"
+          ? v.expiryDate
+          : new Date(v.expiryDate || Date.now()).toISOString();
+
       return {
         voucher: {
-          id: v.id,
+          id: String(v.id || v._id),
           brand: v.brand,
           category: v.category,
-          faceValue: v.faceValue,
-          sellingPrice: v.sellingPrice,
-          minSpend: v.minSpend,
-          expiryDate: v.expiryDate.toISOString(),
-          sellerName: v.seller.name,
-          sellerTrustScore: v.seller.trustScore,
+          faceValue: Number(v.faceValue),
+          sellingPrice: Number(v.sellingPrice),
+          minSpend: Number(v.minSpend || 0),
+          expiryDate: expiryStr,
+          sellerName: v.seller?.name || "Verified Member",
+          sellerTrustScore: Number(v.seller?.trustScore || 90),
         },
         cartValue: cart,
         applicableDiscount,
